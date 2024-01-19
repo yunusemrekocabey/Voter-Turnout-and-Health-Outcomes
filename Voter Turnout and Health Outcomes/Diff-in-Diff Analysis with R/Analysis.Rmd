@@ -1,0 +1,108 @@
+---
+title: "Diff-in-diff Analysis"
+author: "Yunus Emre Kocabey"
+date: "2/1/2022"
+output: html_document
+---
+
+```{r load-libraries-data}
+
+library(tidyverse)
+library(broom)
+library(scales)
+library(modelsummary)
+
+health_raw <- read.csv("data/health_data.csv")
+
+health <- health_raw %>%
+  rename(log_inf_mort = loginfant_mort,
+         infant_mortality = infant_mort,
+         high_vt = highvt)
+```
+
+# Exploratory Data Analysis
+
+```{r message=FALSE, warning=FALSE}
+plot_data <- health %>% 
+
+  mutate(high_vt = factor(high_vt, labels = c("Control Group", "Treatment Group")),
+         after_change = factor(after_change, labels = c("2005", "2020"))) %>% 
+  group_by(high_vt, after_change) %>% 
+  summarize(mean_inf_mort = mean(infant_mortality),
+            se_inf_mort = sd(infant_mortality) / sqrt(n()),
+            upper = mean_inf_mort + (1.96 * se_inf_mort),
+            lower = mean_inf_mort + (-1.96 * se_inf_mort)) 
+
+ggplot(plot_data, aes(x = high_vt, y = mean_inf_mort)) +
+  geom_pointrange(aes(ymin = lower, ymax = upper), 
+                  color = "darkgreen", size = 1) +
+  facet_wrap(vars(after_change))
+```
+
+```{r}
+ggplot(plot_data, aes(x = after_change, y = mean_inf_mort, color = high_vt)) +
+  geom_pointrange(aes(ymin = lower, ymax = upper), size = 1) + 
+  geom_line(aes(group = high_vt))
+
+```
+
+```{r}
+diffs <- health %>% 
+  group_by(after_change, high_vt) %>% 
+  summarize(log_mean_inf_mort = mean(log_inf_mort))
+            
+diffs
+```
+
+```{r}
+before_treatment <- diffs %>% 
+  filter(after_change == 0, high_vt == 1) %>% 
+  pull(log_mean_inf_mort)
+
+before_control <- diffs %>% 
+  filter(after_change == 0, high_vt == 0) %>% 
+  pull(log_mean_inf_mort)
+
+after_treatment <- diffs %>% 
+  filter(after_change == 1, high_vt == 1) %>% 
+  pull(log_mean_inf_mort)
+
+after_control <- diffs %>% 
+  filter(after_change == 1, high_vt == 0) %>% 
+  pull(log_mean_inf_mort)
+
+diff_treatment_before_after <- after_treatment - before_treatment
+diff_treatment_before_after
+
+diff_control_before_after <- after_control - before_control
+diff_control_before_after
+
+diff_diff <- diff_treatment_before_after - diff_control_before_after
+diff_diff
+```
+
+```{r}
+ggplot(diffs, aes(x = as.factor(after_change), 
+                  y = log_mean_inf_mort, 
+                  color = as.factor(high_vt))) + 
+  geom_point() +
+  geom_line(aes(group = as.factor(high_vt))) +
+
+  annotate(geom = "segment", x = "0", xend = "1",
+           y = before_treatment, yend = after_treatment - diff_diff,
+           linetype = "dashed", color = "grey50") +
+  annotate(geom = "segment", x = "1", xend = "1",
+           y = after_treatment, yend = after_treatment - diff_diff,
+           linetype = "dotted", color = "blue")
+```
+
+# Diff-in-Diff With Regression
+
+```{r}
+model_simple <- lm(log_inf_mort ~ high_vt + after_change + high_vt * after_change,
+                  data = health)
+tidy(model_simple)
+```
+
+
+
